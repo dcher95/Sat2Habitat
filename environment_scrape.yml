@@ -1,0 +1,13 @@
+name: herb
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - pip
+  - python
+  - torchvision
+  - pytorch
+  - pytorch-lightning
+  - pandas
+  - fastparquet
+  - bs4
