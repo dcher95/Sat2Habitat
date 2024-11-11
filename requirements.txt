@@ -1,0 +1,8 @@
+rshf>=0.1.2
+matplotlib
+scikit-learn
+scikit-image
+torchaudio
+pytorch_lightning==2.2.1
+wandb
+pandas
