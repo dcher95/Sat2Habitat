@@ -14,6 +14,10 @@ class TaxaBind:
     def get_image_text_encoder(self):
         return open_clip.create_model_and_transforms(self.config.clip)[0]
     
+    def get_text_encoder(self):
+        return open_clip.create_model_and_transforms('ViT-B-16', pretrained='datacomp_l_s1b_b8k')[0]
+        # TODO: return open_clip.create_model_and_transforms(self.config.text)
+    
     def get_tokenizer(self):
         return open_clip.get_tokenizer(self.config.clip)
     
