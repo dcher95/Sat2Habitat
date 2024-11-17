@@ -59,6 +59,9 @@ class CRISP(pl.LightningModule):
             for param in self.sat_encoder.parameters():
                 param.requires_grad = False
         
+        # Satellite projection layer needs to be consistent with location encoder & text encoder
+        self.sat_projection = torch.nn.Linear(768, 512)
+        
         # Get tokenizer + initialize CLIP Text with trainable weights
         self.text_encoder = open_clip.create_model_and_transforms('ViT-B-16', pretrained='datacomp_l_s1b_b8k')[0]
         for layer in self.text_encoder.children():
@@ -72,28 +75,32 @@ class CRISP(pl.LightningModule):
 
     def forward(self, batch):
         im, text_tokens, coords = batch
+        im = im.to(self.device)
+        coords = coords.to(self.device)
 
         # get text features
-        text_features = self.text_encoder.encode_text(text_tokens)
+        text_tokens = text_tokens.squeeze(1)
+        text_features = self.text_encoder.encode_text(text_tokens.to(self.device))
 
         # get location features
         lat_long_features = self.location_encoder(coords.float())
         
         # compute aerial features
-        im_features = self.sat_encoder(im).image_embeds
+        im_features = self.sat_encoder(im)
+        im_features = self.sat_projection(im_features.pooler_output)
 
-        combined_features = im_features.image_embeds + lat_long_features
-        return torch.nn.functional.normalize(combined_features, dim=-1), torch.nn.functional.normalize(text_features, dim=-1)
+        combined_features = im_features + lat_long_features
+        return torch.nn.functional.normalize(combined_features, dim=-1), torch.nn.functional.normalize(text_features, dim=-1), coords
 
     def shared_step(self, batch):
         
-        im_embeds, text_embeds, coords = self(batch)
+        combined_embeds, text_embeds, coords = self(batch)
         
         #exponentiate the log of temperrature
         logit_scale = self.logit_scale.exp()
 
         #compute similarity 
-        im_to_txt_sim = im_embeds @ text_embeds.t() * logit_scale
+        im_to_txt_sim = combined_embeds @ text_embeds.t() * logit_scale
         
         loss = crisp_loss(im_to_txt_sim, coords) 
         return loss   
@@ -165,7 +172,7 @@ if __name__ == '__main__':
 
     trainer = pl.Trainer(
         accelerator='gpu',
-        strategy='ddp',
+        strategy='ddp_find_unused_parameters_true',
         devices=config.devices, 
         max_epochs=config.max_epochs,
         num_nodes=1,

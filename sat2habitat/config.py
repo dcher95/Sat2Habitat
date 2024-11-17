@@ -1,7 +1,7 @@
 from easydict import EasyDict as edict
 
 config = edict()
-config.hab_1to1_csv = "/data/cher/Sat2Habitat/data/gridkey2text.csv"
+# config.hab_1to1_csv = "/data/cher/Sat2Habitat/data/gridkey2text.csv"
 config.im_dir = "/data/cher/Sat2Habitat/data/bing_train_10p/"
 config.im_dir_val = "/data/cher/Sat2Habitat/data/bing_val_10p/"
 config.train_csv_path = "/data/cher/Sat2Habitat/data/crisp/train_10-tst.csv"
@@ -15,7 +15,7 @@ config.random_prob = 0.9
 config.batch_size = 256
 config.lr = 1e-4
 config.accumulate_grad_batches = 8
-config.max_epochs = 5
+config.max_epochs = 20
 config.num_workers = 16
 config.devices = 2
 config.val_check_interval = 0.5

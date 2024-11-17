@@ -63,9 +63,9 @@ class SatHabData(Dataset):
         
         # Get the text description (habitat or randomized)
         text = self._get_text_randomized(row)
-        text_tokens = self.tokenizer(text).squeeze(1)
+        text_tokens = self.tokenizer(text)
         
-        return image.to(self.device), text_tokens.to(self.device), torch.tensor([lat, lon]).to(self.device)
+        return image, text_tokens, torch.tensor([lat, lon])
     
     def _build_image_dict(self):
         image_dict = {}
