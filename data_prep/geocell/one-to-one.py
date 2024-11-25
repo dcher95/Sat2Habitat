@@ -5,9 +5,18 @@ from gbif_utils import build_geodataframe
 # data output paths
 train_data_path = '/data/cher/Sat2Habitat/data/crisp/train.csv'
 val_data_path = '/data/cher/Sat2Habitat/data/crisp/val.csv'
+test_data_path = '/data/cher/Sat2Habitat/data/crisp/test.csv'
+
 train_data_10_path = '/data/cher/Sat2Habitat/data/crisp/train_10.csv'
 val_data_10_path = '/data/cher/Sat2Habitat/data/crisp/val_10.csv'
+test_data_10_path = '/data/cher/Sat2Habitat/data/crisp/test_10.csv'
 
+# imagery output paths
+train_imagery_path = '/data/cher/Sat2Habitat/data/crisp/train_imagery.csv'
+val_imagery_path = '/data/cher/Sat2Habitat/data/crisp/val_imagery.csv'
+test_imagery_path = '/data/cher/Sat2Habitat/data/crisp/test_imagery.csv'
+
+##############################################
 ## Load data
 gbif_path = "/data/cher/Sat2Habitat/data/occurrence.txt"
 species_wiki_path = "/data/cher/Sat2Habitat/data/species_wiki.csv"
@@ -27,11 +36,19 @@ species_wiki_df.rename(columns={col: f"{col}_wiki" if col != 'species' else col 
 habitat_info_w_wiki = occurrences.merge(species_wiki_df, on='species', how='left')
 habitat_info_w_wiki = habitat_info_w_wiki[['key', 'species', 'occurrenceID','lat', 'lon','habitat','habitat_wiki', 'distribution and habitat_wiki', 'description_wiki', 'ecology_wiki', 'distribution_wiki', 'header_wiki']]
 
-## Create train and val dataset csvs with text descriptions
-train_data, val_data = train_test_split(habitat_info_w_wiki, test_size=0.1, random_state=42)
+## Create train and val dataset csvs with text descriptions 60/20/20 split (train, val, test)
+train_data, test_data = train_test_split(habitat_info_w_wiki, test_size=0.4, random_state=42)
+val_data, test_data = train_test_split(test_data, test_size=0.5, random_state=42)
 
 train_data.to_csv(train_data_path, index=False)
 val_data.to_csv(val_data_path, index=False)
+test_data.to_csv(test_data_path, index=False)
 
 train_data.sample(frac=0.1, random_state=42).to_csv(train_data_10_path, index=False)
 val_data.sample(frac=0.1, random_state=42).to_csv(val_data_10_path, index=False)
+test_data.sample(frac=0.1, random_state=42).to_csv(test_data_10_path, index=False)
+
+# Save key, lon, lat for imagery download
+train_data[['key', 'lon', 'lat']].to_csv(train_imagery_path, index=False)
+val_data[['key', 'lon', 'lat']].to_csv(val_imagery_path, index=False)
+test_data[['key', 'lon', 'lat']].to_csv(test_imagery_path, index=False)

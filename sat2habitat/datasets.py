@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 import json
 import os
-from PIL import Image
+from PIL import Image, ImageFile
 from datetime import datetime
 from torchvision.transforms import v2
 import torch
@@ -52,6 +52,9 @@ class SatHabData(Dataset):
         return len(self.data)
     
     def __getitem__(self, index):
+        # Band-aid fix for truncated images
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+
         row = self.data.iloc[index]
         sat_id = row["key"].astype(int).astype(str)
 

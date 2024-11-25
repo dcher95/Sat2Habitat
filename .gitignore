@@ -2,6 +2,7 @@
 *.csv
 *.png
 *.jpg
+*.ckpt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
