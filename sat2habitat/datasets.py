@@ -17,6 +17,7 @@ class SatHabData(Dataset):
         self.image_path = Path(image_path)
         self.csv_path = csv_path
         self.image_dict = self._build_image_dict()
+        self.mode = mode
 
         self.device='cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -64,10 +65,12 @@ class SatHabData(Dataset):
         # Fetch the image path using the sat_id
         image_file = self.image_dict.get(sat_id)
 
-        if image_file is None:
-            # Log the error or skip this sample
-            print(f"Warning: Image for sat_id {sat_id} not found.")
-            return None, None, None  # Or handle it in some other way, like skipping this sample
+        # only when doing evaluations
+        if self.mode == 'test':
+            if image_file is None:
+                # Log the error or skip this sample
+                print(f"Warning: Image for sat_id {sat_id} not found.")
+                return None, None, None  # Or handle it in some other way, like skipping this sample
 
         # Proceed to open the image and process it
         image = self.image_transform(Image.open(image_file))
