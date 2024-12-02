@@ -31,25 +31,21 @@ def haversine_distances(coords):
     distances = earth_radius * c
     return distances
 
-def create_distance_mask(coords, distance_threshold, use_exponential):
+def create_distance_mask(coords, distance_threshold=250):
     distances = haversine_distances(coords)  # Calculate pairwise Haversine distances
-    if use_exponential:
-        distance_mask = torch.exp(-distances / distance_threshold).float()
-        distance_mask[distances > distance_threshold] = 0
-    else:
-        distance_mask = (distances <= distance_threshold).float() 
+    distance_mask = (distances <= distance_threshold).float()  # Apply threshold
     return distance_mask
 
-def crisp_loss(similarity: torch.Tensor, coords, distance_threshold=250, use_exponential=False) -> torch.Tensor:
-    overhead_img_loss = contrastive_loss(similarity, coords, distance_threshold, use_exponential)
-    ground_txt_loss = contrastive_loss(similarity.t(), coords, distance_threshold, use_exponential)
+def crisp_loss(similarity: torch.Tensor, coords, distance_threshold=250) -> torch.Tensor:
+    overhead_img_loss = contrastive_loss(similarity, coords, distance_threshold)
+    ground_txt_loss = contrastive_loss(similarity.t(), coords, distance_threshold)
     return 0.5*torch.mean(torch.sum(overhead_img_loss, dim=-1)) + 0.5*torch.mean(torch.sum(ground_txt_loss, dim=-1))
 
-def contrastive_loss(logits: torch.Tensor, coords: torch.Tensor, distance_threshold, use_exponential) -> torch.Tensor:
-    gt = create_distance_mask(coords, distance_threshold, use_exponential)
+def contrastive_loss(logits: torch.Tensor, coords: torch.Tensor, distance_threshold=250) -> torch.Tensor:
+    gt = create_distance_mask(coords, distance_threshold)
     return -gt*torch.log(logits.softmax(-1)+1e-6)
 
-class CRISP(pl.LightningModule):
+class CRISP_baseline(pl.LightningModule):
     def __init__(self, train_dataset, val_dataset, **kwargs):
         super().__init__()
         self.train_dataset = train_dataset
@@ -76,19 +72,6 @@ class CRISP(pl.LightningModule):
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.batch_size = kwargs.get('batch_size', config.batch_size)
         self.lr = kwargs.get('lr', config.lr)
-        self.use_exponential = kwargs.get('use_exponential', config.use_exponential)
-
-        ### Distance threshold as a learnable parameter ###
-        # Learnable distance threshold
-        init_distance_threshold = kwargs.get('distance_threshold', config.distance_threshold)
-        self.distance_threshold_logit = nn.Parameter(torch.tensor(np.log(init_distance_threshold)))  # Log-scale initialization
-
-    @property
-    def distance_threshold(self):
-        # Ensure the threshold stays within the valid range
-        return torch.clamp(torch.exp(self.distance_threshold_logit), max=1000)
-    
-    ### Distance threshold as a learnable parameter ###
 
     def forward(self, batch):
         im, text_tokens, coords = batch
@@ -113,20 +96,19 @@ class CRISP(pl.LightningModule):
         
         combined_embeds, text_embeds, coords = self(batch)
         
-        #exponentiate the log of temperature
+        #exponentiate the log of temperrature
         logit_scale = self.logit_scale.exp()
 
         #compute similarity 
         im_to_txt_sim = combined_embeds @ text_embeds.t() * logit_scale
         
-        loss = crisp_loss(im_to_txt_sim, coords, self.distance_threshold, self.use_exponential)
+        loss = crisp_loss(im_to_txt_sim, coords) 
         return loss   
 
     def training_step(self, batch, batch_idx):
         loss = self.shared_step(batch)
         self.log('train_loss', loss, sync_dist=True, prog_bar=True, on_epoch=True, batch_size=self.batch_size)
         self.log('temperature', self.logit_scale.data, prog_bar=True, on_epoch=True, batch_size=self.batch_size)
-        self.log('distance_threshold', self.distance_threshold.data, prog_bar=True, on_epoch=True, batch_size=self.batch_size)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -173,13 +155,13 @@ if __name__ == '__main__':
     
     #define dataset
     train_dataset = SatHabData(im_dir, train_csv_path)
-    val_dataset = SatHabData(im_dir_val, val_csv_path, mode='val')
+    val_dataset = SatHabData(im_dir, val_csv_path, mode='val')
 
     #define model
-    model = CRISP(train_dataset=train_dataset, val_dataset=val_dataset)
+    model = CRISP_baseline(train_dataset=train_dataset, val_dataset=val_dataset)
     torch.cuda.empty_cache()
 
-    logger = WandbLogger(project="Sat2Hab", name=config.experiment_name)
+    logger = WandbLogger(project="Sat2Hab", name="sat2hab+crisp+base")
 
     checkpoint = ModelCheckpoint(
         monitor='val_loss',
@@ -202,4 +184,4 @@ if __name__ == '__main__':
         )
     
     trainer.fit(model)
-    trainer.save_checkpoint(f"/data/cher/Sat2Habitat/models/{config.experiment_name}.ckpt")
+    trainer.save_checkpoint("sat2hab-crisp.ckpt")
