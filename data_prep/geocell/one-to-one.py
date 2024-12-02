@@ -3,18 +3,20 @@ from sklearn.model_selection import train_test_split
 from gbif_utils import build_geodataframe
 
 # data output paths
-train_data_path = '/data/cher/Sat2Habitat/data/crisp/train.csv'
-val_data_path = '/data/cher/Sat2Habitat/data/crisp/val.csv'
-test_data_path = '/data/cher/Sat2Habitat/data/crisp/test.csv'
+train_data_path = '/data/cher/Sat2Habitat/data/crisp-data-split/train.csv'
+val_data_path = '/data/cher/Sat2Habitat/data/crisp-data-split/val.csv'
+test_data_path = '/data/cher/Sat2Habitat/data/crisp-data-split/test.csv'
 
-train_data_10_path = '/data/cher/Sat2Habitat/data/crisp/train_10.csv'
-val_data_10_path = '/data/cher/Sat2Habitat/data/crisp/val_10.csv'
-test_data_10_path = '/data/cher/Sat2Habitat/data/crisp/test_10.csv'
+train_data_10_path = '/data/cher/Sat2Habitat/data/crisp-data-split/train_10.csv'
+val_data_10_path = '/data/cher/Sat2Habitat/data/crisp-data-split/val_10.csv'
+test_data_10_path = '/data/cher/Sat2Habitat/data/crisp-data-split/test_10.csv'
 
 # imagery output paths
-train_imagery_path = '/data/cher/Sat2Habitat/data/crisp/train_imagery.csv'
-val_imagery_path = '/data/cher/Sat2Habitat/data/crisp/val_imagery.csv'
-test_imagery_path = '/data/cher/Sat2Habitat/data/crisp/test_imagery.csv'
+train_imagery_path = '/data/cher/Sat2Habitat/data/crisp-data-split/train_imagery.csv'
+val_imagery_path = '/data/cher/Sat2Habitat/data/crisp-data-split/val_imagery.csv'
+test_imagery_path = '/data/cher/Sat2Habitat/data/crisp-data-split/test_imagery.csv'
+
+all_cols = ['key', 'species', 'occurrenceID', 'level2Gid' ,'lat', 'lon','habitat','habitat_wiki', 'distribution and habitat_wiki', 'description_wiki', 'ecology_wiki', 'distribution_wiki', 'header_wiki']
 
 ##############################################
 ## Load data
@@ -34,11 +36,14 @@ occurrences.rename(columns={'decimalLatitude': 'lat', 'decimalLongitude': 'lon'}
 species_wiki_df.rename(columns={col: f"{col}_wiki" if col != 'species' else col for col in species_wiki_df.columns}, inplace=True)
 
 habitat_info_w_wiki = occurrences.merge(species_wiki_df, on='species', how='left')
-habitat_info_w_wiki = habitat_info_w_wiki[['key', 'species', 'occurrenceID','lat', 'lon','habitat','habitat_wiki', 'distribution and habitat_wiki', 'description_wiki', 'ecology_wiki', 'distribution_wiki', 'header_wiki']]
+habitat_info_w_wiki = habitat_info_w_wiki[all_cols]
 
 ## Create train and val dataset csvs with text descriptions 60/20/20 split (train, val, test)
 train_data, test_data = train_test_split(habitat_info_w_wiki, test_size=0.4, random_state=42)
 val_data, test_data = train_test_split(test_data, test_size=0.5, random_state=42)
+
+# Band-aid
+test_data = test_data[~test_data['level2Gid'].isna()]
 
 train_data.to_csv(train_data_path, index=False)
 val_data.to_csv(val_data_path, index=False)

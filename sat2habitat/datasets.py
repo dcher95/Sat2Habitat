@@ -61,14 +61,23 @@ class SatHabData(Dataset):
         lat = torch.tensor(row["lat"])
         lon = torch.tensor(row["lon"])
 
+        # Fetch the image path using the sat_id
         image_file = self.image_dict.get(sat_id)
+
+        if image_file is None:
+            # Log the error or skip this sample
+            print(f"Warning: Image for sat_id {sat_id} not found.")
+            return None, None, None  # Or handle it in some other way, like skipping this sample
+
+        # Proceed to open the image and process it
         image = self.image_transform(Image.open(image_file))
-        
+            
         # Get the text description (habitat or randomized)
         text = self._get_text_randomized(row)
         text_tokens = self.tokenizer(text)
         
         return image, text_tokens, torch.tensor([lat, lon])
+
     
     def _build_image_dict(self):
         image_dict = {}
@@ -100,5 +109,5 @@ if __name__ == '__main__':
     im_dir = "/data/cher/Sat2Habitat/data/bing_train_10p/"
     train_csv_path = "/data/cher/Sat2Habitat/data/crisp/train_10-tst.csv"
     import code; code.interact(local=dict(globals(), **locals()))
-    ds = SatHabData(SatHabData, SatHabData)
+    ds = SatHabData(im_dir, train_csv_path)
     im, text_tokens, coords = ds[0]
