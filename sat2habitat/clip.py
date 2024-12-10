@@ -13,40 +13,15 @@ import torch.multiprocessing as mp
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from config import config
-from curriculum import CurriculumCallback
 
-def haversine_distances(coords):
-    lat_lon_rad = torch.deg2rad(coords)  # Convert latitude and longitude to radians
-    lat = lat_lon_rad[:, 0].unsqueeze(1)
-    lon = lat_lon_rad[:, 1].unsqueeze(1)
-    
-    # Compute pairwise differences
-    dlat = lat - lat.T
-    dlon = lon - lon.T
-    
-    # Haversine formula
-    a = torch.sin(dlat / 2) ** 2 + torch.cos(lat) * torch.cos(lat.T) * torch.sin(dlon / 2) ** 2
-    c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
-    
-    earth_radius = 6371000.0  # Earth’s radius in meters
-    distances = earth_radius * c
-    return distances
+def clip_loss(similarity):
 
-def create_distance_mask(coords, distance_threshold=250):
-    distances = haversine_distances(coords)  # Calculate pairwise Haversine distances
-    distance_mask = (distances <= distance_threshold).float()  # Apply threshold
-    return distance_mask
+    # Compute cross-entropy loss for both directions
+    overhead_img_loss = nn.CrossEntropyLoss()(similarity, torch.arange(similarity.size(0), device=similarity.device))
+    ground_txt_loss = nn.CrossEntropyLoss()(similarity.t(), torch.arange(similarity.size(1), device=similarity.device))
+    return 0.5 * (overhead_img_loss + ground_txt_loss)
 
-def crisp_loss(similarity: torch.Tensor, coords, distance_threshold=250) -> torch.Tensor:
-    overhead_img_loss = contrastive_loss(similarity, coords, distance_threshold)
-    ground_txt_loss = contrastive_loss(similarity.t(), coords, distance_threshold)
-    return 0.5*torch.mean(torch.sum(overhead_img_loss, dim=-1)) + 0.5*torch.mean(torch.sum(ground_txt_loss, dim=-1))
-
-def contrastive_loss(logits: torch.Tensor, coords: torch.Tensor, distance_threshold=250) -> torch.Tensor:
-    gt = create_distance_mask(coords, distance_threshold)
-    return -gt*torch.log(logits.softmax(-1)+1e-6)
-
-class CRISP_baseline(pl.LightningModule):
+class CLIP(pl.LightningModule):
     def __init__(self, train_dataset, val_dataset, **kwargs):
         super().__init__()
         self.train_dataset = train_dataset
@@ -103,7 +78,7 @@ class CRISP_baseline(pl.LightningModule):
         #compute similarity 
         im_to_txt_sim = combined_embeds @ text_embeds.t() * logit_scale
         
-        loss = crisp_loss(im_to_txt_sim, coords) 
+        loss = clip_loss(im_to_txt_sim) 
         return loss   
 
     def training_step(self, batch, batch_idx):
@@ -153,15 +128,13 @@ if __name__ == '__main__':
     im_dir_val = config.im_dir_val
     train_csv_path = config.train_csv_path
     val_csv_path = config.val_csv_path
-
-    curriculum = config.curriculum
     
     #define dataset
-    train_dataset = SatHabData(im_dir, train_csv_path, epoch=0, curriculum=curriculum)
+    train_dataset = SatHabData(im_dir, train_csv_path)
     val_dataset = SatHabData(im_dir, val_csv_path, mode='val')
 
     #define model
-    model = CRISP_baseline(train_dataset=train_dataset, val_dataset=val_dataset)
+    model = CLIP(train_dataset=train_dataset, val_dataset=val_dataset)
     torch.cuda.empty_cache()
 
     logger = WandbLogger(project="Sat2Hab", name=config.experiment_name)
@@ -179,8 +152,7 @@ if __name__ == '__main__':
         devices=config.devices, 
         max_epochs=config.max_epochs,
         num_nodes=1,
-        # callbacks=[checkpoint],
-        callbacks=[checkpoint, CurriculumCallback()], # Add curriculum callback
+        callbacks=[checkpoint],
         logger = logger,
         accumulate_grad_batches=config.accumulate_grad_batches,
         log_every_n_steps=1,

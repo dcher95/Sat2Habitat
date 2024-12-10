@@ -6,9 +6,10 @@ config.im_dir = "/data/cher/Sat2Habitat/data/crisp-imagery/bing_train/"
 config.im_dir_val = "/data/cher/Sat2Habitat/data/crisp-imagery/bing_val/"
 config.im_dir_test = "/data/cher/Sat2Habitat/data/crisp-imagery/bing_test/"
 
-config.train_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/train.csv"
-config.val_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/val.csv"
-config.test_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/test.csv"
+config.train_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/train_w_patches.csv"
+config.val_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/val_w_patches.csv"
+# config.test_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/test.csv"
+config.test_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/test_w_eco.csv"
 
 # Text params
 config.hab_desc = 'habitat'
@@ -16,21 +17,23 @@ config.alt_txt_cols = ['habitat_wiki', 'distribution and habitat_wiki', 'descrip
 config.random_prob = 0.9
 
 # loss params
-config.distance_threshold = 900 # meters
+config.distance_threshold = 500 # meters
 config.use_exponential = True
 
 # training params
 config.batch_size = 256
 config.lr = 1e-4
 config.accumulate_grad_batches = 8
-config.max_epochs = 15
+config.max_epochs = 10
 config.num_workers = 16
-config.devices = 2
+config.devices = 1
 config.val_check_interval = 0.5
+config.curriculum = 8
 
 config.save_dir = 'checkpoints'
-config.filename = 'sathab+crisp+exp-{epoch:02d}-{val_loss:.2f}'
-config.experiment_name = "full-data-crisp+0.9+exp"
+config.experiment_name = "full-data-crisp-exp-0.9-curr8"
+config.filename = 'full-data-crisp-exp-0.9-curr8-{epoch:02d}-{val_loss:.2f}'
+
 
 config.locked_tuning = True
 

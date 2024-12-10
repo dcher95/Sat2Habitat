@@ -2,7 +2,9 @@ import open_clip
 import torch
 from torch.utils.data import DataLoader
 from datasets import SatHabData
-from crisp import CRISP
+from crisp_exp import CRISP
+from crisp import CRISP_baseline
+from clip import CLIP
 from config import config
 import numpy as np
 from tqdm import tqdm
@@ -178,15 +180,89 @@ def evaluate_top_k_retrieval(trained_model, tokenizer, test_dataset, precomputed
 
     return top_k_results, accuracy
 
+def evaluate_retrieval_ecoregion_percentage(trained_model, tokenizer, test_dataset, precomputed_embeddings, k_list=[1, 5, 10, 25], region_col = "NA_L2CODE", filtering=False):
+    
+    # TODO: Predominately the correct eco-region? 
+    # TODO: Is this being calculated correctly? It seems really low. 
+    
+    total_queries = len(test_dataset)
+
+    # Factorize the 'level2Gid' column and store the numerical indices in place
+    geoid_list = test_dataset.data["level2Gid"].tolist()
+    geoid_to_idx = {geoid: idx for idx, geoid in enumerate(set(geoid_list))}
+    test_dataset.data["geoid_idx"] = test_dataset.data["level2Gid"].map(geoid_to_idx)
+
+    # Convert the new 'geoid_idx' column to a tensor for efficient processing
+    geoid_indices = torch.tensor(test_dataset.data["geoid_idx"].values, dtype=torch.long)
+
+    # Store the ecoregion code for each image
+    ecoregion_codes = test_dataset.data[region_col].tolist()
+    
+    # Initialize storage for percentages
+    ecoregion_percentages = {k: [] for k in k_list}  # Stores percentage of correct ecoregion matches for each query
+
+    # Loop over all queries in the test dataset
+    for idx in tqdm(range(total_queries), desc="Evaluating retrieval by ecoregion percentage"):
+        # Get the correct ecoregion for the current query
+        row = test_dataset.data.iloc[idx]
+        correct_ecoregion = row[region_col]
+        geoid_index = row["geoid_idx"] #TODO: Correct this?? Do we need filtering by county??
+
+        # Query text generation
+        query_text = row[config.hab_desc]  # Assuming this is the habitat description
+
+        # Check if the shapefile path is provided. Then do filtering on the county boundary
+        if filtering:
+            # Retrieve top-k image indices for the current query text (for specific county)
+            embeddings_filtered, filtered_indices = filter_embeddings(geoid_index, torch.tensor(ecoregion_codes), precomputed_embeddings)
+            top_image_indices = get_top_k_images(trained_model, tokenizer, query_text, embeddings_filtered, k=max(k_list))
+            # Map the filtered top-k indices back to the image indices
+            top_image_indices_original = filtered_indices[top_image_indices].tolist()
+        else:
+            # Retrieve top-k image indices for the current query text (against all images)
+            top_image_indices = get_top_k_images(trained_model, tokenizer, query_text, precomputed_embeddings, k=max(k_list))
+            top_image_indices_original = top_image_indices
+
+        # Calculate the percentage of top-k results in the correct ecoregion
+        for k in k_list:
+            retrieved_ecoregions = [
+                test_dataset.data.iloc[i]["NA_L2CODE"]
+                for i in top_image_indices_original[:k]
+                if i < len(test_dataset.data)  # Ensure the index is valid
+            ]
+            correct_count = sum(ecoregion == correct_ecoregion for ecoregion in retrieved_ecoregions)
+            percentage_correct = correct_count / k  # Percentage of top-k results in the correct ecoregion
+            ecoregion_percentages[k].append(percentage_correct)
+
+    # Aggregate metrics across all queries
+    aggregated_percentages = {k: sum(ecoregion_percentages[k]) / total_queries for k in k_list}
+
+    # Print statistics
+    print("Top-k Retrieval Ecoregion Percentage:")
+    for k in k_list:
+        print(f"Top-{k} mean percentage: {aggregated_percentages[k] * 100:.2f}%")
+
+    return ecoregion_percentages, aggregated_percentages
+
 
 # Example usage
 if __name__ == "__main__":
 
     embedding_file_path = config.embedding_file_path
 
-    trained_model = CRISP.load_from_checkpoint(config.experiment_model_path,
+    # Baseline
+    trained_model = CLIP.load_from_checkpoint(config.experiment_model_path,
                                                train_dataset=None,
                                                val_dataset=None)
+    
+    # Baseline
+    # trained_model = CRISP_baseline.load_from_checkpoint(config.experiment_model_path,
+    #                                            train_dataset=None,
+    #                                            val_dataset=None)
+
+    # trained_model = CRISP.load_from_checkpoint(config.experiment_model_path,
+    #                                            train_dataset=None,
+    #                                            val_dataset=None)
     trained_model.to('cuda') 
 
     test_dataset = SatHabData(config.im_dir_test, 
@@ -226,15 +302,49 @@ if __name__ == "__main__":
                                                        filtering = True)  
 
     # Save the results to a pickle file
-    with open(f"{config.metric_save_path}.pt", 'wb') as f:
+    with open(f"{config.metric_save_path}.pkl", 'wb') as f:
         pickle.dump({'top_k_results': top_k_results, 'accuracy': accuracy}, f)
-        print(f"Top-k results and accuracy saved to {config.metric_save_path}.pt")
+        print(f"Top-k results and accuracy saved to {config.metric_save_path}.pkl")
 
-    with open(f"{config.metric_save_path}_county.pt", 'wb') as f:
+    with open(f"{config.metric_save_path}_county.pkl", 'wb') as f:
         pickle.dump({'top_k_results': top_k_results_county, 'accuracy': accuracy_county}, f)
-        print(f"Top-k results and accuracy saved to {config.metric_save_path}_county.pt")
+        print(f"Top-k results and accuracy saved to {config.metric_save_path}_county.pkl")
 
-    # Distance??? Retrieved image distance???
+    ### Evaluate Top-K Retrieval by ecoregion ###
+    top_k_results_eco, accuracy_eco = evaluate_retrieval_ecoregion_percentage(trained_model, 
+                                                       tokenizer, 
+                                                       test_dataset, 
+                                                       precomputed_embeddings,
+                                                       filtering = False)
+    
+    with open(f"{config.metric_save_path}_eco.pkl", 'wb') as f:
+        pickle.dump({'top_k_results': top_k_results_eco, 'accuracy': accuracy_eco}, f)
+        print(f"Top-k results and accuracy saved to {config.metric_save_path}_eco.pkl")
+    
+    # ### Evaluate Top-K Retrieval by ecoregion county ###
+    # top_k_results_county_eco, accuracy_county_eco = evaluate_retrieval_ecoregion_percentage(trained_model, 
+    #                                                    tokenizer, 
+    #                                                    test_dataset, 
+    #                                                    precomputed_embeddings,
+    #                                                    filtering = True)
+
+    # with open(f"{config.metric_save_path}_county_eco.pt", 'wb') as f:
+    #     pickle.dump({'top_k_results': top_k_results_county_eco, 'accuracy': accuracy_county_eco}, f)
+    #     print(f"Top-k results and accuracy saved to {config.metric_save_path}_county_eco.pkl")
+
+
+    # How to show that it builds a more granular eco-region map?
+    # 1. For each row, get the eco-region
+    # 2. Run inference for each row
+    # 3. Get the top-k results
+    # 4. See if the top-k results are in the same eco-region
+    # 5. Calculate the accuracy for each eco-region
+        # Per-eco-region accuracy to identify eco-regions where the model excels or struggles.
+        # Overall precision, recall, and F1 score across eco-regions.
+        # Eco-region diversity index: Are certain eco-regions consistently overrepresented or underrepresented in the retrieval results?
+
+    # T-SNE visualization of the embeddings of different eco-regions??
+
 
 
 

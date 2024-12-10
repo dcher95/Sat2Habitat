@@ -13,6 +13,7 @@ import torch.multiprocessing as mp
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from config import config
+from curriculum import CurriculumCallback
 
 def haversine_distances(coords):
     lat_lon_rad = torch.deg2rad(coords)  # Convert latitude and longitude to radians
@@ -54,6 +55,7 @@ class CRISP(pl.LightningModule):
         super().__init__()
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
+        self.current_epoch_internal = 0
         
         self.location_encoder = GeoCLIP.from_pretrained('MVRL/ecogeo')
 
@@ -135,6 +137,9 @@ class CRISP(pl.LightningModule):
         return loss
 
     def train_dataloader(self):
+        # Update the epoch for curriculum learning
+        if hasattr(self.train_dataset, 'update_epoch'):
+            self.train_dataset.update_epoch(self.current_epoch_internal)
         return DataLoader(self.train_dataset,
                           batch_size=self.batch_size,
                           num_workers=config.num_workers,
@@ -147,6 +152,10 @@ class CRISP(pl.LightningModule):
                           num_workers=config.num_workers,
                           shuffle=False,
                           persistent_workers=False)
+    
+    def on_train_epoch_start(self):
+        # Increment the internal epoch tracker
+        self.current_epoch_internal = self.current_epoch
 
     def configure_optimizers(self):
         params = self.parameters()
@@ -170,10 +179,14 @@ if __name__ == '__main__':
     im_dir_val = config.im_dir_val
     train_csv_path = config.train_csv_path
     val_csv_path = config.val_csv_path
+
+    curriculum = config.curriculum
     
     #define dataset
-    train_dataset = SatHabData(im_dir, train_csv_path)
-    val_dataset = SatHabData(im_dir_val, val_csv_path, mode='val')
+    train_dataset = SatHabData(im_dir, train_csv_path, epoch=0, curriculum=curriculum)
+    val_dataset = SatHabData(im_dir, val_csv_path, mode='val')
+    # train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers, persistent_workers=False)
+    # val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers, persistent_workers=False)
 
     #define model
     model = CRISP(train_dataset=train_dataset, val_dataset=val_dataset)
@@ -195,6 +208,7 @@ if __name__ == '__main__':
         max_epochs=config.max_epochs,
         num_nodes=1,
         callbacks=[checkpoint],
+        # callbacks=[checkpoint, CurriculumCallback(train_loader)], # Add curriculum callback
         logger = logger,
         accumulate_grad_batches=config.accumulate_grad_batches,
         log_every_n_steps=1,
