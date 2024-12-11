@@ -136,6 +136,7 @@ def evaluate_top_k_retrieval(trained_model, tokenizer, test_dataset, precomputed
     geoid_indices = torch.tensor(test_dataset.data["geoid_idx"].values, dtype=torch.long)
 
     top_k_results = {k: [] for k in k_list}  # To store the top-k indices for each query
+    first_correct_ranks = []
     
     # Loop over all images in the test dataset
     for idx in tqdm(range(total_queries), desc="Evaluating top-k retrievals"):
@@ -165,6 +166,18 @@ def evaluate_top_k_retrieval(trained_model, tokenizer, test_dataset, precomputed
             top_k_results[k].append(top_image_indices_original[:k])  # Store only the top-k results
 
         # Check if the correct key is in the top-k results for each k
+        found_correct = False
+        for rank, img_idx in enumerate(top_image_indices_original):
+            if str(test_dataset.data.iloc[img_idx]["key"]) == correct_key:
+                first_correct_ranks.append(rank + 1)  # Store 1-based rank
+                found_correct = True
+                break
+        
+        # If no correct match is found, assign a rank higher than max(k_list)
+        if not found_correct:
+            first_correct_ranks.append(len(top_image_indices_original) + 1)
+
+        # Check if the correct key is in the top-k results for each k
         
         for k in k_list:
             if correct_key in [str(test_dataset.data.iloc[i]["key"]) for i in top_image_indices_original[:k]]:
@@ -172,13 +185,17 @@ def evaluate_top_k_retrieval(trained_model, tokenizer, test_dataset, precomputed
     
     # Calculate accuracy for each top-k list
     accuracy = {k: correct_counts[k] / total_queries for k in k_list} 
+
+    # Calculate average rank of first correct matches
+    average_rank = sum(first_correct_ranks) / len(first_correct_ranks)
     
     # Print statistics
     print("Top-k Retrieval Accuracy:")
     for k in k_list:
         print(f"Top-{k} accuracy: {accuracy[k] * 100:.2f}%")
+    print(f"Average rank of first correct match: {average_rank:.2f}")
 
-    return top_k_results, accuracy
+    return top_k_results, accuracy, average_rank
 
 def evaluate_retrieval_ecoregion_percentage(trained_model, tokenizer, test_dataset, precomputed_embeddings, k_list=[1, 5, 10, 25], region_col = "NA_L2CODE", filtering=False):
     
@@ -250,10 +267,16 @@ if __name__ == "__main__":
 
     embedding_file_path = config.embedding_file_path
 
+    ############## DEBUGGING ##############
     # Baseline
-    trained_model = CLIP.load_from_checkpoint(config.experiment_model_path,
-                                               train_dataset=None,
-                                               val_dataset=None)
+    # trained_model = CLIP.load_from_checkpoint(config.experiment_model_path,
+    #                                            train_dataset=None,
+    #                                            val_dataset=None)
+    
+    checkpoint = torch.load(config.experiment_model_path)
+    trained_model = CLIP(train_dataset=None, val_dataset=None)
+    trained_model.load_state_dict(checkpoint["state_dict"], strict=False)
+    ############## DEBUGGING ##############
     
     # Baseline
     # trained_model = CRISP_baseline.load_from_checkpoint(config.experiment_model_path,
@@ -287,7 +310,7 @@ if __name__ == "__main__":
 
     ### Evaluate Top-K Retrieval on all US ###
     tokenizer = open_clip.get_tokenizer('hf-hub:MVRL/taxabind-vit-b-16')
-    top_k_results, accuracy = evaluate_top_k_retrieval(trained_model, 
+    top_k_results, accuracy, average_rank = evaluate_top_k_retrieval(trained_model, 
                                                        tokenizer, 
                                                        test_dataset, 
                                                        precomputed_embeddings,
@@ -295,7 +318,7 @@ if __name__ == "__main__":
     
 
     ### Evaluate Top-K Retrieval by county ###
-    top_k_results_county, accuracy_county = evaluate_top_k_retrieval(trained_model, 
+    top_k_results_county, accuracy_county, average_rank = evaluate_top_k_retrieval(trained_model, 
                                                        tokenizer, 
                                                        test_dataset, 
                                                        precomputed_embeddings,
@@ -303,23 +326,23 @@ if __name__ == "__main__":
 
     # Save the results to a pickle file
     with open(f"{config.metric_save_path}.pkl", 'wb') as f:
-        pickle.dump({'top_k_results': top_k_results, 'accuracy': accuracy}, f)
-        print(f"Top-k results and accuracy saved to {config.metric_save_path}.pkl")
+        pickle.dump({'top_k_results': top_k_results, 'accuracy': accuracy, 'average_rank': average_rank}, f)
+        print(f"Top-k results, accuracy, and average rank saved to {config.metric_save_path}.pkl")
 
     with open(f"{config.metric_save_path}_county.pkl", 'wb') as f:
-        pickle.dump({'top_k_results': top_k_results_county, 'accuracy': accuracy_county}, f)
-        print(f"Top-k results and accuracy saved to {config.metric_save_path}_county.pkl")
+        pickle.dump({'top_k_results': top_k_results_county, 'accuracy': accuracy_county, 'average_rank': average_rank}, f)
+        print(f"Top-k results, accuracy, and average rank saved to {config.metric_save_path}_county.pkl")
 
     ### Evaluate Top-K Retrieval by ecoregion ###
-    top_k_results_eco, accuracy_eco = evaluate_retrieval_ecoregion_percentage(trained_model, 
-                                                       tokenizer, 
-                                                       test_dataset, 
-                                                       precomputed_embeddings,
-                                                       filtering = False)
+    # top_k_results_eco, accuracy_eco = evaluate_retrieval_ecoregion_percentage(trained_model, 
+    #                                                    tokenizer, 
+    #                                                    test_dataset, 
+    #                                                    precomputed_embeddings,
+    #                                                    filtering = False)
     
-    with open(f"{config.metric_save_path}_eco.pkl", 'wb') as f:
-        pickle.dump({'top_k_results': top_k_results_eco, 'accuracy': accuracy_eco}, f)
-        print(f"Top-k results and accuracy saved to {config.metric_save_path}_eco.pkl")
+    # with open(f"{config.metric_save_path}_eco.pkl", 'wb') as f:
+    #     pickle.dump({'top_k_results': top_k_results_eco, 'accuracy': accuracy_eco}, f)
+    #     print(f"Top-k results and accuracy saved to {config.metric_save_path}_eco.pkl")
     
     # ### Evaluate Top-K Retrieval by ecoregion county ###
     # top_k_results_county_eco, accuracy_county_eco = evaluate_retrieval_ecoregion_percentage(trained_model, 
