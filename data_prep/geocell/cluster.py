@@ -1,6 +1,8 @@
+### DIDN't USE THIS FILE FOR THE FINAL MODEL ###
 import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN
+from sklearn.model_selection import train_test_split
 from distance_utils import _generate_diameter_in_deg
 from helper import (
     _check_max_distances,
@@ -88,24 +90,28 @@ if __name__ == '__main__':
     meters_per_pixel = 0.6
     dimension_distance = dimension * meters_per_pixel
 
-    # output_bbox_poly=f'/data/cher/universe7/herbarium/data/geocell/clusters_{dimension}m_{meters_per_pixel}ppixel_polygon.geojson'
-    output_bbox_pt=f'/data/cher/universe7/herbarium/data/geocell/clusters_{dimension}m_{meters_per_pixel}ppixel_centroid.csv'
-    output_csv=f'/data/cher/universe7/herbarium/data/geocell/clusters_key_{dimension}m.csv'
+    output_bbox_pt=f'/data/cher/Sat2Habitat/data/cluster/clusters_{dimension}m_{meters_per_pixel}ppixel_centroid.csv'
+    output_csv=f'/data/cher/Sat2Habitat/data/cluster/clusters_key_{dimension}m.csv'
 
     _create_directories([output_bbox_pt, 
                         #  output_bbox_poly, 
                          output_csv])
     
     ### Input file downloaded from gbif -- occurrences
-    gdf = build_geodataframe(gbif_path = "/data/cher/universe7/herbarium/data/MO-herbarium/occurrence.txt")
+    gbif_path = "/data/cher/Sat2Habitat/data/occurrence.txt"
+    gdf = build_geodataframe(gbif_path)
+
+    # keep same test dataset as other methodologies
+    train_data, test_data = train_test_split(gdf, test_size=0.4, random_state=42)
+    val_data, test_data = train_test_split(test_data, test_size=0.5, random_state=42)
+    train_and_val_data = pd.concat([train_data, val_data])
 
     dimension_deg = _generate_diameter_in_deg(dimension_distance)
 
     # Process each state
     states = gdf['stateProvince'].unique()
     for state in tqdm(states, desc="Processing States"):
-        print(state)
-        gdf_s = gdf[gdf['stateProvince'] == state].copy()
+        gdf_s = train_and_val_data[train_and_val_data['stateProvince'] == state].copy()
         gdf_s = geocell_clustering(gdf_s, state, dimension_distance)
 
         # Save {occurrenceID, cluster} key
@@ -115,11 +121,18 @@ if __name__ == '__main__':
         bbox_gdf = _create_cluster_bbox(gdf_s, dimension_deg)
         bbox_gdf[['cluster', 'lon', 'lat']].to_csv(output_bbox_pt, mode='a', index=False)
 
+    # Save all clusters as keys (factorize)
+    centroids = pd.read_csv(output_bbox_pt)
+    key_clusters = pd.read_csv(output_csv)
 
-        # if not os.path.exists(output_geojson):
-        #     bbox_gdf.to_file(output_bbox_poly, driver="GeoJSON")
-        # else:
-        #     bbox_gdf.to_file(output_bbox_poly, driver="GeoJSON", mode='a')
+    cluster_to_index = {v: k for k, v in centroids['cluster'].to_dict().items()}
 
+    centroids['key'] = centroids['cluster'].map(cluster_to_index)
+    centroids[['key', 'lon', 'lat']].to_csv("/data/cher/Sat2Habitat/data/cluster/clusters_256m_0.6ppixel_centroid.csv", index=False)
+    
+    key_clusters['key'] = key_clusters['cluster'].map(cluster_to_index)
+    key_clusters[['occurrenceID','key']].to_csv("/data/cher/Sat2Habitat/data/cluster/clusters_key_256m.csv", index=False)
+
+    
     print(f"Saved all clusters centroids to {output_bbox_pt}")
     print(f"Saved occurrenceID and cluster mapping to {output_csv}")

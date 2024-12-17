@@ -46,7 +46,7 @@ def contrastive_loss(logits: torch.Tensor, coords: torch.Tensor, distance_thresh
     gt = create_distance_mask(coords, distance_threshold)
     return -gt*torch.log(logits.softmax(-1)+1e-6)
 
-class CRISP_baseline(pl.LightningModule):
+class CRISP(pl.LightningModule):
     def __init__(self, train_dataset, val_dataset, **kwargs):
         super().__init__()
         self.train_dataset = train_dataset
@@ -161,7 +161,7 @@ if __name__ == '__main__':
     val_dataset = SatHabData(im_dir, val_csv_path, mode='val')
 
     #define model
-    model = CRISP_baseline(train_dataset=train_dataset, val_dataset=val_dataset)
+    model = CRISP(train_dataset=train_dataset, val_dataset=val_dataset)
     torch.cuda.empty_cache()
 
     logger = WandbLogger(project="Sat2Hab", name=config.experiment_name)

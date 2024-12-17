@@ -9,7 +9,7 @@ config.im_dir_test = "/data/cher/Sat2Habitat/data/crisp-imagery/bing_test/"
 config.train_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/train_w_patches.csv"
 config.val_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/val_w_patches.csv"
 # config.test_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/test.csv"
-config.test_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/test_w_eco.csv"
+config.test_csv_path = "/data/cher/Sat2Habitat/data/crisp-data-split/test_w_eco_w_patches.csv"
 
 # Text params
 config.hab_desc = 'habitat'
@@ -31,8 +31,8 @@ config.val_check_interval = 0.5
 config.curriculum = 8
 
 config.save_dir = 'checkpoints'
-config.experiment_name = "full-data-crisp-exp-0.9-curr8"
-config.filename = 'full-data-crisp-exp-0.9-curr8-{epoch:02d}-{val_loss:.2f}'
+config.experiment_name = "full-data-crisp250-nowiki"
+config.filename = 'full-data-crisp250-nowiki-{epoch:02d}-{val_loss:.2f}'
 
 
 config.locked_tuning = True

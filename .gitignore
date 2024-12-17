@@ -4,6 +4,12 @@
 *.jpg
 *.ckpt
 
+# unnecessary folders
+data/*
+metrics/*
+sat2habitat/wandb/*
+wandb/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

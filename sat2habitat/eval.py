@@ -2,13 +2,11 @@ import open_clip
 import torch
 from torch.utils.data import DataLoader
 from datasets import SatHabData
-from crisp_exp import CRISP
-from crisp import CRISP_baseline
-from clip import CLIP
 from config import config
 import numpy as np
 from tqdm import tqdm
 import os
+import random
 
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -16,6 +14,11 @@ import pickle
 from utils import get_county_polygon
 from shapely.geometry import Point
 import geopandas as gpd
+
+from clip import CLIP
+from crisp import CRISP
+from crisp_exp import CRISPExp
+from crisp_curr import CRISPCurr
 
 def precompute_image_embeddings(model, data_loader):
     """
@@ -136,7 +139,6 @@ def evaluate_top_k_retrieval(trained_model, tokenizer, test_dataset, precomputed
     geoid_indices = torch.tensor(test_dataset.data["geoid_idx"].values, dtype=torch.long)
 
     top_k_results = {k: [] for k in k_list}  # To store the top-k indices for each query
-    first_correct_ranks = []
     
     # Loop over all images in the test dataset
     for idx in tqdm(range(total_queries), desc="Evaluating top-k retrievals"):
@@ -166,18 +168,6 @@ def evaluate_top_k_retrieval(trained_model, tokenizer, test_dataset, precomputed
             top_k_results[k].append(top_image_indices_original[:k])  # Store only the top-k results
 
         # Check if the correct key is in the top-k results for each k
-        found_correct = False
-        for rank, img_idx in enumerate(top_image_indices_original):
-            if str(test_dataset.data.iloc[img_idx]["key"]) == correct_key:
-                first_correct_ranks.append(rank + 1)  # Store 1-based rank
-                found_correct = True
-                break
-        
-        # If no correct match is found, assign a rank higher than max(k_list)
-        if not found_correct:
-            first_correct_ranks.append(len(top_image_indices_original) + 1)
-
-        # Check if the correct key is in the top-k results for each k
         
         for k in k_list:
             if correct_key in [str(test_dataset.data.iloc[i]["key"]) for i in top_image_indices_original[:k]]:
@@ -185,17 +175,13 @@ def evaluate_top_k_retrieval(trained_model, tokenizer, test_dataset, precomputed
     
     # Calculate accuracy for each top-k list
     accuracy = {k: correct_counts[k] / total_queries for k in k_list} 
-
-    # Calculate average rank of first correct matches
-    average_rank = sum(first_correct_ranks) / len(first_correct_ranks)
     
     # Print statistics
     print("Top-k Retrieval Accuracy:")
     for k in k_list:
         print(f"Top-{k} accuracy: {accuracy[k] * 100:.2f}%")
-    print(f"Average rank of first correct match: {average_rank:.2f}")
 
-    return top_k_results, accuracy, average_rank
+    return top_k_results, accuracy
 
 def evaluate_retrieval_ecoregion_percentage(trained_model, tokenizer, test_dataset, precomputed_embeddings, k_list=[1, 5, 10, 25], region_col = "NA_L2CODE", filtering=False):
     
@@ -261,31 +247,89 @@ def evaluate_retrieval_ecoregion_percentage(trained_model, tokenizer, test_datas
 
     return ecoregion_percentages, aggregated_percentages
 
+def evaluate_median_rank_recall(trained_model, tokenizer, test_dataset, precomputed_embeddings, filtering=False, sampling=1000):
+
+    total_queries = len(test_dataset)
+    sampled_indices = random.sample(range(total_queries), min(sampling, total_queries))  # Randomly sample 1000 queries or fewer if the dataset is smaller
+
+    # Factorize the 'level2Gid' column and store the numerical indices in place
+    geoid_list = test_dataset.data["level2Gid"].tolist()
+    geoid_to_idx = {geoid: idx for idx, geoid in enumerate(set(geoid_list))}
+    test_dataset.data["geoid_idx"] = test_dataset.data["level2Gid"].map(geoid_to_idx)
+
+    # Convert the new 'geoid_idx' column to a tensor for efficient processing
+    geoid_indices = torch.tensor(test_dataset.data["geoid_idx"].values, dtype=torch.long)
+
+    ranks = []  # List to store the rank of the correct match for each query
+
+    # Loop over the sampled queries
+    for idx in tqdm(sampled_indices, desc="Evaluating median rank recall"):
+        # Get the correct key for the current query
+        row = test_dataset.data.iloc[idx]
+        correct_key = row["key"].astype(int).astype(str)
+        geoid_index = row["geoid_idx"].astype(int)
+
+        # Query text generation
+        query_text = row[config.hab_desc]  # Assuming this is the habitat description
+
+        if filtering:
+            # Retrieve filtered embeddings based on county boundary
+            embeddings_filtered, filtered_indices = filter_embeddings(geoid_index, geoid_indices, precomputed_embeddings)
+            top_image_indices = get_top_k_images(trained_model, tokenizer, query_text, embeddings_filtered, k=precomputed_embeddings.shape[0])
+
+            # Map the filtered indices back to the original dataset indices
+            ranked_image_indices = filtered_indices[top_image_indices].tolist()
+        else:
+            # Retrieve ranked indices for all images
+            ranked_image_indices = get_top_k_images(trained_model, tokenizer, query_text, precomputed_embeddings, k=precomputed_embeddings.shape[0])
+            # ranked_image_indices = get_top_k_images(trained_model, tokenizer, query_text, precomputed_embeddings, k=1000)
+
+        # Determine the rank of the correct key
+        for rank, image_idx in enumerate(ranked_image_indices, start=1):
+            # Ensure image_idx is within bounds and corresponds to test_dataset
+            if image_idx < len(test_dataset.data) and str(test_dataset.data.iloc[image_idx]["key"]) == correct_key:
+                ranks.append(rank)
+                break
+
+    # Calculate the median rank
+    median_rank = np.median(ranks) if ranks else float('inf')
+    average_rank = np.average(ranks) if ranks else float('inf')
+
+    # Print statistics
+    print(f"Median rank: {median_rank:.2f}")
+    print(f"Average rank: {average_rank:.2f}")
+
+    return ranks, median_rank, average_rank
+
 
 # Example usage
 if __name__ == "__main__":
 
     embedding_file_path = config.embedding_file_path
 
-    ############## DEBUGGING ##############
-    # Baseline
-    # trained_model = CLIP.load_from_checkpoint(config.experiment_model_path,
-    #                                            train_dataset=None,
-    #                                            val_dataset=None)
-    
-    checkpoint = torch.load(config.experiment_model_path)
-    trained_model = CLIP(train_dataset=None, val_dataset=None)
-    trained_model.load_state_dict(checkpoint["state_dict"], strict=False)
-    ############## DEBUGGING ##############
-    
-    # Baseline
-    # trained_model = CRISP_baseline.load_from_checkpoint(config.experiment_model_path,
-    #                                            train_dataset=None,
-    #                                            val_dataset=None)
-
-    # trained_model = CRISP.load_from_checkpoint(config.experiment_model_path,
-    #                                            train_dataset=None,
-    #                                            val_dataset=None)
+    if 'clip' in config.experiment_model_path:
+        # Baseline
+        trained_model = CLIP.load_from_checkpoint(config.experiment_model_path,
+                                                train_dataset=None,
+                                                val_dataset=None)
+    elif 'exp' in config.experiment_model_path:
+        trained_model = CRISPExp.load_from_checkpoint(config.experiment_model_path,
+                                                    train_dataset=None,
+                                                    val_dataset=None)
+    elif '250' in config.experiment_model_path:
+        # Baseline CRISP
+        trained_model = CRISP.load_from_checkpoint(config.experiment_model_path,
+                                                   train_dataset=None,
+                                                   val_dataset=None)
+    elif 'curr' in config.experiment_model_path:
+        trained_model = CRISPCurr.load_from_checkpoint(config.experiment_model_path,
+                                                    train_dataset=None,
+                                                    val_dataset=None)
+    else:
+        trained_model = CRISPExp.load_from_checkpoint(config.experiment_model_path,
+                                                    train_dataset=None,
+                                                    val_dataset=None)
+        
     trained_model.to('cuda') 
 
     test_dataset = SatHabData(config.im_dir_test, 
@@ -310,28 +354,40 @@ if __name__ == "__main__":
 
     ### Evaluate Top-K Retrieval on all US ###
     tokenizer = open_clip.get_tokenizer('hf-hub:MVRL/taxabind-vit-b-16')
-    top_k_results, accuracy, average_rank = evaluate_top_k_retrieval(trained_model, 
+    # top_k_results, accuracy = evaluate_top_k_retrieval(trained_model, 
+    #                                                    tokenizer, 
+    #                                                    test_dataset, 
+    #                                                    precomputed_embeddings,
+    #                                                    filtering = False)
+    
+
+    # ### Evaluate Top-K Retrieval by county ###
+    # top_k_results_county, accuracy_county = evaluate_top_k_retrieval(trained_model, 
+    #                                                    tokenizer, 
+    #                                                    test_dataset, 
+    #                                                    precomputed_embeddings,
+    #                                                    filtering = True)  
+
+    # # Save the results to a pickle file
+    # with open(f"{config.metric_save_path}.pkl", 'wb') as f:
+    #     pickle.dump({'top_k_results': top_k_results, 'accuracy': accuracy}, f)
+    #     print(f"Top-k results, accuracy saved to {config.metric_save_path}.pkl")
+
+    # with open(f"{config.metric_save_path}_county.pkl", 'wb') as f:
+    #     pickle.dump({'top_k_results': top_k_results_county, 'accuracy': accuracy_county}, f)
+    #     print(f"Top-k results, accuracy saved to {config.metric_save_path}_county.pkl")
+
+    # Evaluate Median Rank of Recall
+    ranks, median_rank, average_rank = evaluate_median_rank_recall(trained_model, 
                                                        tokenizer, 
                                                        test_dataset, 
                                                        precomputed_embeddings,
                                                        filtering = False)
     
 
-    ### Evaluate Top-K Retrieval by county ###
-    top_k_results_county, accuracy_county, average_rank = evaluate_top_k_retrieval(trained_model, 
-                                                       tokenizer, 
-                                                       test_dataset, 
-                                                       precomputed_embeddings,
-                                                       filtering = True)  
-
-    # Save the results to a pickle file
-    with open(f"{config.metric_save_path}.pkl", 'wb') as f:
-        pickle.dump({'top_k_results': top_k_results, 'accuracy': accuracy, 'average_rank': average_rank}, f)
-        print(f"Top-k results, accuracy, and average rank saved to {config.metric_save_path}.pkl")
-
-    with open(f"{config.metric_save_path}_county.pkl", 'wb') as f:
-        pickle.dump({'top_k_results': top_k_results_county, 'accuracy': accuracy_county, 'average_rank': average_rank}, f)
-        print(f"Top-k results, accuracy, and average rank saved to {config.metric_save_path}_county.pkl")
+    with open(f"{config.metric_save_path}_rank.pkl", 'wb') as f:
+        pickle.dump({'ranks': ranks, 'median_rank': median_rank, "average_rank" : average_rank}, f)
+        print(f"Median and Average rank saved to {config.metric_save_path}_rank.pkl")
 
     ### Evaluate Top-K Retrieval by ecoregion ###
     # top_k_results_eco, accuracy_eco = evaluate_retrieval_ecoregion_percentage(trained_model, 
